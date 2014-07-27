@@ -1,10 +1,38 @@
-// gocstat reads selected statistics about Linux containers
-// e.g. CPU & memory usage
-// BasePath is automatically polled to discover containers.
-// Calls to ReadCgroups returns statistics for the discovered containers.
-// Containers that are removed from the system are automatically pruned
-// from the list of discovered containers
-
+// gocstat reads selected statistics about Linux containers.
+//
+// Containers are discovered by walking BasePath periodically
+// Containers removed from the system are automatically pruned
+// from the list of discovered containers.
+//
+// The following example shows how to initalize the package and poll
+// statistics in a for loop:
+//
+//	errChan := make(chan error)
+//	err := linuxproc.Init(errChan)
+//	if err != nil {
+//		log.Fatal(err)
+//	}
+//	go func() {
+//		for {
+//			time.Sleep(1 * time.Second)
+//			containers, err := linuxproc.ReadStats()
+//			if err != nil {
+//				log.Fatal(err)
+//			}
+//			for containerId, stat := range containers {
+//				// stat.Memory.RSS
+//				// stat.Memory.Cache
+//				// stat.CPU.User
+//				// stat.CPU.System
+//			}
+//		}
+//	}()
+//	// block waiting for channel
+//	err = <-errChan
+//	if err != nil {
+//		fmt.Printf("errChan %s\n", err)
+//	}
+//
 package gocstat
 
 import (
@@ -20,16 +48,17 @@ import (
 	"time"
 )
 
-var updateInterval = time.Duration(5 * time.Second)
+const MemFile = "memory.stat"
+const CPUFile = "cpuacct.stat"
+
+var updateInterval = time.Duration(30 * time.Second)
 
 // Directory to start search
 var BasePath = "/sys/fs/cgroup"
 
-// Read directories which match this regex
+// Process directories which match this regex. The section enclosed in parentheses
+// will be used as the container ID
 var ContainerDirRegexp = `.*docker-([0-9a-z]{64})\.scope.*`
-
-var MemFile = "memory.stat"
-var CPUFile = "cpuacct.stat"
 
 var re *regexp.Regexp
 
@@ -41,17 +70,17 @@ type cgroups struct {
 }
 
 type ContainerStat struct {
-	Memory CMemStat
-	CPU    CCPUStat
+	Memory MemStat
+	CPU    CPUStat
 }
 
-type CCPUStat struct {
+type CPUStat struct {
 	path   string
 	User   uint64 `json:"user"`
 	System uint64 `json:"system"`
 }
 
-type CMemStat struct {
+type MemStat struct {
 	path  string
 	RSS   uint64 `json:"rss"`
 	Cache uint64 `json:"cache"`
@@ -101,9 +130,10 @@ func (cs *ContainerStat) createMemStat(content string) {
 	}
 }
 
-// Launches go routine to periodically scan BasePath for containers
-// Supply optional errChan for reporting errors
-func InitCgroups(errChan chan<- error) error {
+// Init initalizes the package and must be run before ReadStats().
+// A goroutine is launched to periodically scan BasePath for containers.
+// errChan is optional and used by the goroutine for reporting any errors.
+func Init(errChan chan<- error) error {
 	var err error
 	re, err = regexp.Compile(ContainerDirRegexp)
 	if err != nil {
@@ -142,9 +172,8 @@ func updatePaths(path string) error {
 	return nil
 }
 
-// Get current container readings. Returns a map of container IDs and
-// corresponding ContainerStat
-func ReadCgroups() (map[string]*ContainerStat, error) {
+// Retrieve current container statistics. The map key corresponds with the container ID.
+func ReadStats() (map[string]*ContainerStat, error) {
 	if cg == nil {
 		return nil, fmt.Errorf("not initialized")
 	}
