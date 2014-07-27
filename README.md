@@ -13,14 +13,14 @@ statistics in a for loop:
 
 ```Go
 errChan := make(chan error)
-err := linuxproc.Init(errChan)
+err := gocstat.Init(errChan)
 if err != nil {
 	log.Fatal(err)
 }
 go func() {
 	for {
 		time.Sleep(1 * time.Second)
-		containers, err := linuxproc.ReadStats()
+		containers, err := gocstat.ReadStats()
 		if err != nil {
 			log.Fatal(err)
 		}
