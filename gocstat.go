@@ -1,6 +1,6 @@
 // gocstat reads selected statistics about Linux containers.
 //
-// Containers are discovered by walking BasePath periodically
+// Containers are discovered by walking BasePath periodically.
 // Containers removed from the system are automatically pruned
 // from the list of discovered containers.
 //
@@ -13,11 +13,12 @@
 //		log.Fatal(err)
 //	}
 //	go func() {
+//		defer close(errChan)
 //		for {
 //			time.Sleep(1 * time.Second)
 //			containers, err := gocstat.ReadStats()
 //			if err != nil {
-//				log.Fatal(err)
+//				errChan <- err
 //			}
 //			for containerId, stat := range containers {
 //				// stat.Memory.RSS
@@ -66,27 +67,35 @@ var cg *cgroups
 
 type cgroups struct {
 	sync.Mutex
-	Containers map[string]*ContainerStat
+	Containers Stats
 }
 
-type ContainerStat struct {
+type ContainerStats struct {
 	Memory MemStat
 	CPU    CPUStat
 }
 
+// map key corresponds with the container ID.
+type Stats map[string]*ContainerStats
+
+type common struct {
+	path      string
+	Timestamp time.Time `json:"timestamp"`
+}
+
 type CPUStat struct {
-	path   string
+	common
 	User   uint64 `json:"user"`
 	System uint64 `json:"system"`
 }
 
 type MemStat struct {
-	path  string
+	common
 	RSS   uint64 `json:"rss"`
 	Cache uint64 `json:"cache"`
 }
 
-func (cs *ContainerStat) createCPUStat(content string) {
+func (c *CPUStat) create(content string) {
 
 	lines := strings.Split(content, "\n")
 	if len(lines) < 2 {
@@ -99,16 +108,17 @@ func (cs *ContainerStat) createCPUStat(content string) {
 		}
 		switch i {
 		case 0:
-			cs.CPU.User, _ = strconv.ParseUint(fields[1], 10, 64)
+			c.User, _ = strconv.ParseUint(fields[1], 10, 64)
 		case 1:
-			cs.CPU.System, _ = strconv.ParseUint(fields[1], 10, 64)
+			c.System, _ = strconv.ParseUint(fields[1], 10, 64)
 		default:
 			break
 		}
 	}
+	c.Timestamp = time.Now()
 }
 
-func (cs *ContainerStat) createMemStat(content string) {
+func (m *MemStat) create(content string) {
 
 	lines := strings.Split(content, "\n")
 	if len(lines) < 2 {
@@ -121,13 +131,14 @@ func (cs *ContainerStat) createMemStat(content string) {
 		}
 		switch i {
 		case 0:
-			cs.Memory.Cache, _ = strconv.ParseUint(fields[1], 10, 64)
+			m.Cache, _ = strconv.ParseUint(fields[1], 10, 64)
 		case 1:
-			cs.Memory.RSS, _ = strconv.ParseUint(fields[1], 10, 64)
+			m.RSS, _ = strconv.ParseUint(fields[1], 10, 64)
 		default:
 			break
 		}
 	}
+	m.Timestamp = time.Now()
 }
 
 // Init initalizes the package and must be run before ReadStats().
@@ -140,7 +151,7 @@ func Init(errChan chan<- error) error {
 		return err
 	}
 	cg = &cgroups{}
-	cg.Containers = make(map[string]*ContainerStat)
+	cg.Containers = make(Stats)
 	go func() {
 		for {
 			err := updatePaths(BasePath)
@@ -167,13 +178,13 @@ func updatePaths(path string) error {
 	defer cg.Unlock()
 
 	if err := filepath.Walk(path, walkFn); err != nil {
-		return fmt.Errorf("error walking path '%s', err %s", err)
+		return fmt.Errorf("error walking path '%s', err %s", path, err)
 	}
 	return nil
 }
 
-// Retrieve current container statistics. The map key corresponds with the container ID.
-func ReadStats() (map[string]*ContainerStat, error) {
+// Retrieve current container statistics.
+func ReadStats() (Stats, error) {
 	if cg == nil {
 		return nil, fmt.Errorf("not initialized")
 	}
@@ -190,7 +201,7 @@ func ReadStats() (map[string]*ContainerStat, error) {
 				}
 				return nil, err
 			}
-			cg.Containers[id].createMemStat(string(b))
+			cg.Containers[id].Memory.create(string(b))
 		}
 		if cs.CPU.path != "" {
 			b, err := ioutil.ReadFile(cs.CPU.path)
@@ -202,7 +213,7 @@ func ReadStats() (map[string]*ContainerStat, error) {
 				}
 				return nil, err
 			}
-			cg.Containers[id].createCPUStat(string(b))
+			cg.Containers[id].CPU.create(string(b))
 		}
 	}
 	return cg.Containers, nil
@@ -220,7 +231,7 @@ func walkFn(filePath string, info os.FileInfo, err error) error {
 	id := matches[1]
 	if info.IsDir() {
 		if _, ok := cg.Containers[id]; !ok {
-			cg.Containers[id] = &ContainerStat{}
+			cg.Containers[id] = &ContainerStats{}
 		}
 	} else {
 		if _, ok := cg.Containers[id]; ok {
