@@ -49,21 +49,21 @@ import (
 	"time"
 )
 
-const MemFile = "memory.stat"
-const CPUFile = "cpuacct.stat"
+const (
+	memFile = "memory.stat"
+	cPUFile = "cpuacct.stat"
+)
 
-var updateInterval = time.Duration(30 * time.Second)
-
-// Directory to start search
-var BasePath = "/sys/fs/cgroup"
-
-// Process directories which match this regex. The section enclosed in parentheses
-// will be used as the container ID
-var ContainerDirRegexp = `.*docker-([0-9a-z]{64})\.scope.*`
-
-var re *regexp.Regexp
-
-var cg *cgroups
+var (
+	namesUpdateInterval = time.Duration(30 * time.Second)
+	// Directory to start search
+	BasePath = "/sys/fs/cgroup"
+	// Process directories which match this regex. The section enclosed in parentheses
+	// will be used as the container ID
+	ContainerDirRegexp = `.*docker-([0-9a-z]{64})\.scope.*`
+	re                 *regexp.Regexp
+	cg                 *cgroups
+)
 
 type cgroups struct {
 	sync.Mutex
@@ -73,24 +73,25 @@ type cgroups struct {
 type ContainerStats struct {
 	Memory MemStat
 	CPU    CPUStat
+	BlkIO  BlkIOStat
 }
 
 // map key corresponds with the container ID.
 type Stats map[string]*ContainerStats
 
-type common struct {
+type commonFields struct {
 	path      string
 	Timestamp time.Time `json:"timestamp"`
 }
 
 type CPUStat struct {
-	common
+	commonFields
 	User   uint64 `json:"user"`
 	System uint64 `json:"system"`
 }
 
 type MemStat struct {
-	common
+	commonFields
 	RSS   uint64 `json:"rss"`
 	Cache uint64 `json:"cache"`
 }
@@ -163,7 +164,7 @@ func Init(errChan chan<- error) error {
 				close(errChan)
 				return
 			}
-			time.Sleep(updateInterval)
+			time.Sleep(namesUpdateInterval)
 		}
 	}()
 	return nil
@@ -192,31 +193,48 @@ func ReadStats() (Stats, error) {
 	defer cg.Unlock()
 	for id, cs := range cg.Containers {
 		if cs.Memory.path != "" {
-			b, err := ioutil.ReadFile(cs.Memory.path)
+			b, err := readFile(cs.Memory.path, id)
 			if err != nil {
-				if os.IsNotExist(err) {
-					fmt.Printf("removing old container id %s\n", id)
-					delete(cg.Containers, id)
-					continue
-				}
 				return nil, err
 			}
 			cg.Containers[id].Memory.create(string(b))
 		}
 		if cs.CPU.path != "" {
-			b, err := ioutil.ReadFile(cs.CPU.path)
+			b, err := readFile(cs.CPU.path, id)
 			if err != nil {
-				if os.IsNotExist(err) {
-					fmt.Printf("removing old container id %s\n", id)
-					delete(cg.Containers, id)
-					continue
-				}
 				return nil, err
 			}
 			cg.Containers[id].CPU.create(string(b))
 		}
+		if cs.BlkIO.Bytes.path != "" {
+			b, err := readFile(cs.BlkIO.Bytes.path, id)
+			if err != nil {
+				return nil, err
+			}
+			cg.Containers[id].BlkIO.Bytes.create(string(b))
+		}
+		if cs.BlkIO.IOPS.path != "" {
+			b, err := readFile(cs.BlkIO.IOPS.path, id)
+			if err != nil {
+				return nil, err
+			}
+			cg.Containers[id].BlkIO.IOPS.create(string(b))
+		}
 	}
 	return cg.Containers, nil
+}
+
+func readFile(path, id string) ([]byte, error) {
+	b, err := ioutil.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			fmt.Printf("removing old container id %s\n", id)
+			delete(cg.Containers, id)
+			return []byte{}, nil
+		}
+		return nil, err
+	}
+	return b, nil
 }
 
 func walkFn(filePath string, info os.FileInfo, err error) error {
@@ -235,11 +253,16 @@ func walkFn(filePath string, info os.FileInfo, err error) error {
 		}
 	} else {
 		if _, ok := cg.Containers[id]; ok {
-			if path.Base(info.Name()) == MemFile {
+			baseName := path.Base(info.Name())
+			switch baseName {
+			case memFile:
 				cg.Containers[id].Memory.path = filePath
-			}
-			if path.Base(info.Name()) == CPUFile {
+			case cPUFile:
 				cg.Containers[id].CPU.path = filePath
+			case blkIOFile:
+				cg.Containers[id].BlkIO.Bytes.path = filePath
+			case blkIOBytesFile:
+				cg.Containers[id].BlkIO.IOPS.path = filePath
 			}
 		}
 	}
