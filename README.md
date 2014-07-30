@@ -4,8 +4,8 @@
 
 gocstat is a Go library for reading selected statistics about Linux containers. It should be considered Beta and not suitable for production.
 
-Containers are discovered by walking `BasePath` periodically
-Containers removed from the system are automatically pruned
+Running containers are discovered by walking `BasePath` periodically
+Containers stopped or removed from the system are automatically pruned
 from the list of discovered containers.
 
 The following example shows how to initalize the package and poll
