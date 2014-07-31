@@ -20,11 +20,11 @@ if err != nil {
 go func() {
 	for {
 		time.Sleep(1 * time.Second)
-		containers, err := gocstat.ReadStats()
+		stats, err := gocstat.ReadStats()
 		if err != nil {
 			log.Fatal(err)
 		}
-		for containerId, stat := range containers {
+		for containerId, stat := range stats {
 			 // stat.Memory.RSS
 			 // stat.Memory.Cache
 			 // stat.CPU.User

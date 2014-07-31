@@ -42,35 +42,32 @@ func (b *BlkServiced) create(content string) {
 	b.Timestamp = time.Now()
 	lines := strings.Split(content, "\n")
 	lastDeviceStr := ""
-	tmpContent := ""
+	tmpContent := make([]string, 0)
 	b.Devices = make([]BlkDevice, 0)
-	for _, line := range lines {
+	for i, line := range lines {
 		fields := strings.Fields(line)
 		if len(fields) != 3 {
 			continue
 		}
 		deviceStr := fields[0]
 
-		if deviceStr != lastDeviceStr {
-			if lastDeviceStr != "" {
-				bd := BlkDevice{}
-				bd.create(tmpContent)
-				b.Devices = append(b.Devices, bd)
-			}
-			tmpContent = ""
-		} else {
-			tmpContent += line
+		if deviceStr != lastDeviceStr && i > 0 {
+			bd := BlkDevice{}
+			bd.create(tmpContent)
+			b.Devices = append(b.Devices, bd)
+			tmpContent = make([]string, 0)
 		}
+		tmpContent = append(tmpContent, line)
+		lastDeviceStr = deviceStr
 	}
-	if tmpContent != "" {
-		bd := BlkDevice{}
+	if len(tmpContent) != 0 {
+		bd := &BlkDevice{}
 		bd.create(tmpContent)
-		b.Devices = append(b.Devices, bd)
+		b.Devices = append(b.Devices, *bd)
 	}
 }
 
-func (b *BlkDevice) create(content string) {
-	lines := strings.Split(content, "\n")
+func (b *BlkDevice) create(lines []string) {
 	for _, line := range lines {
 		fields := strings.Fields(line)
 		if len(fields) != 3 {

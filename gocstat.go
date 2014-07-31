@@ -16,11 +16,11 @@
 //		defer close(errChan)
 //		for {
 //			time.Sleep(1 * time.Second)
-//			containers, err := gocstat.ReadStats()
+//			stats, err := gocstat.ReadStats()
 //			if err != nil {
 //				errChan <- err
 //			}
-//			for containerId, stat := range containers {
+//			for containerId, stat := range stats {
 //				// stat.Memory.RSS
 //				// stat.Memory.Cache
 //				// stat.CPU.User
@@ -62,12 +62,12 @@ var (
 	// will be used as the container ID
 	ContainerDirRegexp = `.*docker-([0-9a-z]{64})\.scope.*`
 	re                 *regexp.Regexp
-	cg                 *cgroups
+	h                  *holder
 )
 
-type cgroups struct {
+type holder struct {
 	sync.Mutex
-	Containers Stats
+	containerStats Stats
 }
 
 type ContainerStats struct {
@@ -97,7 +97,6 @@ type MemStat struct {
 }
 
 func (c *CPUStat) create(content string) {
-
 	lines := strings.Split(content, "\n")
 	if len(lines) < 2 {
 		return
@@ -151,8 +150,8 @@ func Init(errChan chan<- error) error {
 	if err != nil {
 		return err
 	}
-	cg = &cgroups{}
-	cg.Containers = make(Stats)
+	h = &holder{}
+	h.containerStats = make(Stats)
 	go func() {
 		for {
 			err := updatePaths(BasePath)
@@ -171,12 +170,8 @@ func Init(errChan chan<- error) error {
 }
 
 func updatePaths(path string) error {
-	if cg == nil {
-		return fmt.Errorf("not initialized")
-	}
-
-	cg.Lock()
-	defer cg.Unlock()
+	h.Lock()
+	defer h.Unlock()
 
 	if err := filepath.Walk(path, walkFn); err != nil {
 		return fmt.Errorf("error walking path '%s', err %s", path, err)
@@ -186,50 +181,49 @@ func updatePaths(path string) error {
 
 // Retrieve current container statistics.
 func ReadStats() (Stats, error) {
-	if cg == nil {
+	if h == nil {
 		return nil, fmt.Errorf("not initialized")
 	}
-	cg.Lock()
-	defer cg.Unlock()
-	for id, cs := range cg.Containers {
+	h.Lock()
+	defer h.Unlock()
+	for id, cs := range h.containerStats {
 		if cs.Memory.path != "" {
 			b, err := readFile(cs.Memory.path, id)
 			if err != nil {
 				return nil, err
 			}
-			cg.Containers[id].Memory.create(string(b))
+			h.containerStats[id].Memory.create(string(b))
 		}
 		if cs.CPU.path != "" {
 			b, err := readFile(cs.CPU.path, id)
 			if err != nil {
 				return nil, err
 			}
-			cg.Containers[id].CPU.create(string(b))
+			h.containerStats[id].CPU.create(string(b))
 		}
 		if cs.BlkIO.Bytes.path != "" {
 			b, err := readFile(cs.BlkIO.Bytes.path, id)
 			if err != nil {
 				return nil, err
 			}
-			cg.Containers[id].BlkIO.Bytes.create(string(b))
+			h.containerStats[id].BlkIO.Bytes.create(string(b))
 		}
 		if cs.BlkIO.IOPS.path != "" {
 			b, err := readFile(cs.BlkIO.IOPS.path, id)
 			if err != nil {
 				return nil, err
 			}
-			cg.Containers[id].BlkIO.IOPS.create(string(b))
+			h.containerStats[id].BlkIO.IOPS.create(string(b))
 		}
 	}
-	return cg.Containers, nil
+	return h.containerStats, nil
 }
 
 func readFile(path, id string) ([]byte, error) {
 	b, err := ioutil.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
-			fmt.Printf("removing old container id %s\n", id)
-			delete(cg.Containers, id)
+			delete(h.containerStats, id)
 			return []byte{}, nil
 		}
 		return nil, err
@@ -248,21 +242,21 @@ func walkFn(filePath string, info os.FileInfo, err error) error {
 	}
 	id := matches[1]
 	if info.IsDir() {
-		if _, ok := cg.Containers[id]; !ok {
-			cg.Containers[id] = &ContainerStats{}
+		if _, ok := h.containerStats[id]; !ok {
+			h.containerStats[id] = &ContainerStats{}
 		}
 	} else {
-		if _, ok := cg.Containers[id]; ok {
+		if _, ok := h.containerStats[id]; ok {
 			baseName := path.Base(info.Name())
 			switch baseName {
 			case memFile:
-				cg.Containers[id].Memory.path = filePath
+				h.containerStats[id].Memory.path = filePath
 			case cPUFile:
-				cg.Containers[id].CPU.path = filePath
+				h.containerStats[id].CPU.path = filePath
 			case blkIOFile:
-				cg.Containers[id].BlkIO.Bytes.path = filePath
+				h.containerStats[id].BlkIO.Bytes.path = filePath
 			case blkIOBytesFile:
-				cg.Containers[id].BlkIO.IOPS.path = filePath
+				h.containerStats[id].BlkIO.IOPS.path = filePath
 			}
 		}
 	}
