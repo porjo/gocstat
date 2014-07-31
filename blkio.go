@@ -19,15 +19,15 @@ type BlkIOStat struct {
 
 // Block device tallies
 type BlkServiced struct {
-	commonFields
+	CommonFields
 	Devices []BlkDevice
 }
 
 type BlkDevice struct {
 	// block device major number
-	Major int
+	Major uint64
 	// block device minor number
-	Minor int
+	Minor uint64
 	// units read
 	Read uint64
 	// units written
@@ -78,10 +78,9 @@ func (b *BlkDevice) create(lines []string) {
 		unit := fields[2]
 
 		device := strings.Split(deviceStr, ":")
-		b.Major, _ = strconv.Atoi(device[0])
-		if len(device) == 2 {
-			b.Major, _ = strconv.Atoi(device[0])
-			b.Minor, _ = strconv.Atoi(device[1])
+		if len(device) > 1 {
+			b.Major, _ = strconv.ParseUint(device[0], 10, 64)
+			b.Minor, _ = strconv.ParseUint(device[1], 10, 64)
 		}
 
 		switch op {

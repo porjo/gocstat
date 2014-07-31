@@ -55,14 +55,16 @@ const (
 )
 
 var (
-	namesUpdateInterval = time.Duration(30 * time.Second)
 	// Directory to start search
 	BasePath = "/sys/fs/cgroup"
+
 	// Process directories which match this regex. The section enclosed in parentheses
 	// will be used as the container ID
 	ContainerDirRegexp = `.*docker-([0-9a-z]{64})\.scope.*`
-	re                 *regexp.Regexp
-	h                  *holder
+
+	re                  *regexp.Regexp
+	h                   *holder
+	namesUpdateInterval = time.Duration(30 * time.Second)
 )
 
 type holder struct {
@@ -79,21 +81,21 @@ type ContainerStats struct {
 // map key corresponds with the container ID.
 type Stats map[string]*ContainerStats
 
-type commonFields struct {
+type CommonFields struct {
 	path      string
-	Timestamp time.Time `json:"timestamp"`
+	Timestamp time.Time
 }
 
 type CPUStat struct {
-	commonFields
-	User   uint64 `json:"user"`
-	System uint64 `json:"system"`
+	CommonFields
+	User   uint64
+	System uint64
 }
 
 type MemStat struct {
-	commonFields
-	RSS   uint64 `json:"rss"`
-	Cache uint64 `json:"cache"`
+	CommonFields
+	RSS   uint64
+	Cache uint64
 }
 
 func (c *CPUStat) create(content string) {
