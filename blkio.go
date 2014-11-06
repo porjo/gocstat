@@ -7,7 +7,7 @@ import (
 )
 
 const (
-	blkIOFile      = "blkio.io_serviced"
+	blkIOIOPSFile  = "blkio.io_serviced"
 	blkIOBytesFile = "blkio.io_service_bytes"
 )
 

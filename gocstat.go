@@ -63,13 +63,13 @@ var (
 	ContainerDirRegexp = `.*docker-([0-9a-z]{64})\.scope.*`
 
 	re                  *regexp.Regexp
-	h                   *holder
+	statsHolder         *holder
 	namesUpdateInterval = time.Duration(30 * time.Second)
 )
 
 type holder struct {
 	sync.Mutex
-	containerStats Stats
+	stats Stats
 }
 
 type ContainerStats struct {
@@ -121,7 +121,6 @@ func (c *CPUStat) create(content string) {
 }
 
 func (m *MemStat) create(content string) {
-
 	lines := strings.Split(content, "\n")
 	if len(lines) < 2 {
 		return
@@ -152,8 +151,8 @@ func Init(errChan chan<- error) error {
 	if err != nil {
 		return err
 	}
-	h = &holder{}
-	h.containerStats = make(Stats)
+	statsHolder = &holder{}
+	statsHolder.stats = make(Stats)
 	go func() {
 		for {
 			err := updatePaths(BasePath)
@@ -172,8 +171,8 @@ func Init(errChan chan<- error) error {
 }
 
 func updatePaths(path string) error {
-	h.Lock()
-	defer h.Unlock()
+	statsHolder.Lock()
+	defer statsHolder.Unlock()
 
 	if err := filepath.Walk(path, walkFn); err != nil {
 		return fmt.Errorf("error walking path '%s', err %s", path, err)
@@ -183,49 +182,49 @@ func updatePaths(path string) error {
 
 // Retrieve current container statistics.
 func ReadStats() (Stats, error) {
-	if h == nil {
+	if statsHolder == nil {
 		return nil, fmt.Errorf("not initialized")
 	}
-	h.Lock()
-	defer h.Unlock()
-	for id, cs := range h.containerStats {
+	statsHolder.Lock()
+	defer statsHolder.Unlock()
+	for id, cs := range statsHolder.stats {
 		if cs.Memory.path != "" {
 			b, err := readFile(cs.Memory.path, id)
 			if err != nil {
 				return nil, err
 			}
-			h.containerStats[id].Memory.create(string(b))
+			statsHolder.stats[id].Memory.create(string(b))
 		}
 		if cs.CPU.path != "" {
 			b, err := readFile(cs.CPU.path, id)
 			if err != nil {
 				return nil, err
 			}
-			h.containerStats[id].CPU.create(string(b))
+			statsHolder.stats[id].CPU.create(string(b))
 		}
 		if cs.BlkIO.Bytes.path != "" {
 			b, err := readFile(cs.BlkIO.Bytes.path, id)
 			if err != nil {
 				return nil, err
 			}
-			h.containerStats[id].BlkIO.Bytes.create(string(b))
+			statsHolder.stats[id].BlkIO.Bytes.create(string(b))
 		}
 		if cs.BlkIO.IOPS.path != "" {
 			b, err := readFile(cs.BlkIO.IOPS.path, id)
 			if err != nil {
 				return nil, err
 			}
-			h.containerStats[id].BlkIO.IOPS.create(string(b))
+			statsHolder.stats[id].BlkIO.IOPS.create(string(b))
 		}
 	}
-	return h.containerStats, nil
+	return statsHolder.stats, nil
 }
 
 func readFile(path, id string) ([]byte, error) {
 	b, err := ioutil.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
-			delete(h.containerStats, id)
+			delete(statsHolder.stats, id)
 			return []byte{}, nil
 		}
 		return nil, err
@@ -235,7 +234,7 @@ func readFile(path, id string) ([]byte, error) {
 
 func walkFn(filePath string, info os.FileInfo, err error) error {
 	if err != nil {
-		return err
+		return nil
 	}
 
 	matches := re.FindStringSubmatch(filePath)
@@ -244,21 +243,21 @@ func walkFn(filePath string, info os.FileInfo, err error) error {
 	}
 	id := matches[1]
 	if info.IsDir() {
-		if _, ok := h.containerStats[id]; !ok {
-			h.containerStats[id] = &ContainerStats{}
+		if _, ok := statsHolder.stats[id]; !ok {
+			statsHolder.stats[id] = &ContainerStats{}
 		}
 	} else {
-		if _, ok := h.containerStats[id]; ok {
+		if _, ok := statsHolder.stats[id]; ok {
 			baseName := path.Base(info.Name())
 			switch baseName {
 			case memFile:
-				h.containerStats[id].Memory.path = filePath
+				statsHolder.stats[id].Memory.path = filePath
 			case cPUFile:
-				h.containerStats[id].CPU.path = filePath
-			case blkIOFile:
-				h.containerStats[id].BlkIO.Bytes.path = filePath
+				statsHolder.stats[id].CPU.path = filePath
+			case blkIOIOPSFile:
+				statsHolder.stats[id].BlkIO.Bytes.path = filePath
 			case blkIOBytesFile:
-				h.containerStats[id].BlkIO.IOPS.path = filePath
+				statsHolder.stats[id].BlkIO.IOPS.path = filePath
 			}
 		}
 	}
