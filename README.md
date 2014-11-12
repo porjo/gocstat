@@ -2,7 +2,7 @@
 
 [![godoc/gocstat](https://godoc.org/github.com/porjo/gocstat?status.png)](https://godoc.org/github.com/porjo/gocstat)
 
-gocstat is a Go library for reading selected statistics about Linux containers. It should be considered Beta and not suitable for production.
+gocstat is a Go library for reading selected statistics about Linux containers.
 
 Running containers are discovered by walking `BasePath` periodically
 Containers stopped or removed from the system are automatically pruned

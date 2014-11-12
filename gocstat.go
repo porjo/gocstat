@@ -1,3 +1,19 @@
+// Copyright (C) 2014 Ian Bishop
+//
+// This program is free software; you can redistribute it and/or modify
+// it under the terms of the GNU General Public License as published by
+// the Free Software Foundation; either version 2 of the License, or
+// (at your option) any later version.
+//
+// This program is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+// GNU General Public License for more details.
+//
+// You should have received a copy of the GNU General Public License along
+// with this program; if not, write to the Free Software Foundation, Inc.,
+// 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+
 // gocstat reads selected statistics about Linux containers.
 //
 // Containers are discovered by walking BasePath periodically.
@@ -39,6 +55,7 @@ package gocstat
 import (
 	"fmt"
 	"io/ioutil"
+	//	"log"
 	"os"
 	"path"
 	"path/filepath"
@@ -69,33 +86,37 @@ var (
 
 type holder struct {
 	sync.Mutex
-	stats Stats
+	containers Cmap
 }
 
-type ContainerStats struct {
+type Cstats struct {
 	Memory MemStat
 	CPU    CPUStat
 	BlkIO  BlkIOStat
 }
 
-// map key corresponds with the container ID.
-type Stats map[string]*ContainerStats
+// Map key corresponds with the container ID.
+//
+// Map value must be a pointer to a struct, see:
+// https://code.google.com/p/go/issues/detail?id=3117
+type Cmap map[string]*Cstats
 
-type CommonFields struct {
+type stat interface {
+	create(content string)
+}
+
+type CPUStat struct {
+	User      uint64
+	System    uint64
 	path      string
 	Timestamp time.Time
 }
 
-type CPUStat struct {
-	CommonFields
-	User   uint64
-	System uint64
-}
-
 type MemStat struct {
-	CommonFields
-	RSS   uint64
-	Cache uint64
+	RSS       uint64
+	Cache     uint64
+	path      string
+	Timestamp time.Time
 }
 
 func (c *CPUStat) create(content string) {
@@ -152,7 +173,7 @@ func Init(errChan chan<- error) error {
 		return err
 	}
 	statsHolder = &holder{}
-	statsHolder.stats = make(Stats)
+	statsHolder.containers = make(Cmap)
 	go func() {
 		for {
 			err := updatePaths(BasePath)
@@ -181,55 +202,59 @@ func updatePaths(path string) error {
 }
 
 // Retrieve current container statistics.
-func ReadStats() (Stats, error) {
+func ReadStats() (Cmap, error) {
 	if statsHolder == nil {
 		return nil, fmt.Errorf("not initialized")
 	}
 	statsHolder.Lock()
 	defer statsHolder.Unlock()
-	for id, cs := range statsHolder.stats {
+	for id, cs := range statsHolder.containers {
 		if cs.Memory.path != "" {
-			b, err := readFile(cs.Memory.path, id)
+			b, err := readFile(cs.Memory.path)
 			if err != nil {
+				if os.IsNotExist(err) {
+					delete(statsHolder.containers, id)
+					continue
+				}
 				return nil, err
 			}
-			statsHolder.stats[id].Memory.create(string(b))
+			statsHolder.containers[id].Memory.create(string(b))
 		}
 		if cs.CPU.path != "" {
-			b, err := readFile(cs.CPU.path, id)
+			b, err := readFile(cs.CPU.path)
 			if err != nil {
+				if os.IsNotExist(err) {
+					delete(statsHolder.containers, id)
+					continue
+				}
 				return nil, err
 			}
-			statsHolder.stats[id].CPU.create(string(b))
+			statsHolder.containers[id].CPU.create(string(b))
 		}
-		if cs.BlkIO.Bytes.path != "" {
-			b, err := readFile(cs.BlkIO.Bytes.path, id)
-			if err != nil {
-				return nil, err
+		/*
+			if cs.BlkIO.Bytes.path != "" {
+				err := readFile(cs.BlkIO.Bytes.path, id, &statsHolder.containers[id].BlkIO.Bytes)
+				if err != nil {
+					return nil, err
+				}
 			}
-			statsHolder.stats[id].BlkIO.Bytes.create(string(b))
-		}
-		if cs.BlkIO.IOPS.path != "" {
-			b, err := readFile(cs.BlkIO.IOPS.path, id)
-			if err != nil {
-				return nil, err
+			if cs.BlkIO.IOPS.path != "" {
+				err := readFile(cs.BlkIO.IOPS.path, id, &statsHolder.containers[id].BlkIO.IOPS)
+				if err != nil {
+					return nil, err
+				}
 			}
-			statsHolder.stats[id].BlkIO.IOPS.create(string(b))
-		}
+		*/
 	}
-	return statsHolder.stats, nil
+	return statsHolder.containers, nil
 }
 
-func readFile(path, id string) ([]byte, error) {
-	b, err := ioutil.ReadFile(path)
+func readFile(path string) (b []byte, err error) {
+	b, err = ioutil.ReadFile(path)
 	if err != nil {
-		if os.IsNotExist(err) {
-			delete(statsHolder.stats, id)
-			return []byte{}, nil
-		}
-		return nil, err
+		return
 	}
-	return b, nil
+	return
 }
 
 func walkFn(filePath string, info os.FileInfo, err error) error {
@@ -243,21 +268,21 @@ func walkFn(filePath string, info os.FileInfo, err error) error {
 	}
 	id := matches[1]
 	if info.IsDir() {
-		if _, ok := statsHolder.stats[id]; !ok {
-			statsHolder.stats[id] = &ContainerStats{}
+		if _, ok := statsHolder.containers[id]; !ok {
+			statsHolder.containers[id] = &Cstats{}
 		}
 	} else {
-		if _, ok := statsHolder.stats[id]; ok {
+		if _, ok := statsHolder.containers[id]; ok {
 			baseName := path.Base(info.Name())
 			switch baseName {
 			case memFile:
-				statsHolder.stats[id].Memory.path = filePath
+				statsHolder.containers[id].Memory.path = filePath
 			case cPUFile:
-				statsHolder.stats[id].CPU.path = filePath
+				statsHolder.containers[id].CPU.path = filePath
 			case blkIOIOPSFile:
-				statsHolder.stats[id].BlkIO.Bytes.path = filePath
+				statsHolder.containers[id].BlkIO.Bytes.path = filePath
 			case blkIOBytesFile:
-				statsHolder.stats[id].BlkIO.IOPS.path = filePath
+				statsHolder.containers[id].BlkIO.IOPS.path = filePath
 			}
 		}
 	}
