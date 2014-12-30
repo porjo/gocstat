@@ -23,8 +23,8 @@ import (
 )
 
 const (
-	blkIOIOPSFile  = "blkio.io_serviced"
-	blkIOBytesFile = "blkio.io_service_bytes"
+	blkIOIOPSFile  = "blkio.throttle.io_serviced"
+	blkIOBytesFile = "blkio.throttle.io_service_bytes"
 )
 
 // Block device input/output statistics

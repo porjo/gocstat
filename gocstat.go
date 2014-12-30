@@ -231,20 +231,30 @@ func ReadStats() (Cmap, error) {
 			}
 			statsHolder.containers[id].CPU.create(string(b))
 		}
-		/*
-			if cs.BlkIO.Bytes.path != "" {
-				err := readFile(cs.BlkIO.Bytes.path, id, &statsHolder.containers[id].BlkIO.Bytes)
-				if err != nil {
-					return nil, err
+		if cs.BlkIO.Bytes.path != "" {
+			//err := readFile(cs.BlkIO.Bytes.path, id, &statsHolder.containers[id].BlkIO.Bytes)
+			b, err := readFile(cs.BlkIO.Bytes.path)
+			if err != nil {
+				if os.IsNotExist(err) {
+					delete(statsHolder.containers, id)
+					continue
 				}
+				return nil, err
 			}
-			if cs.BlkIO.IOPS.path != "" {
-				err := readFile(cs.BlkIO.IOPS.path, id, &statsHolder.containers[id].BlkIO.IOPS)
-				if err != nil {
-					return nil, err
+			statsHolder.containers[id].BlkIO.Bytes.create(string(b))
+		}
+		if cs.BlkIO.IOPS.path != "" {
+			//err := readFile(cs.BlkIO.IOPS.path, id, &statsHolder.containers[id].BlkIO.IOPS)
+			b, err := readFile(cs.BlkIO.IOPS.path)
+			if err != nil {
+				if os.IsNotExist(err) {
+					delete(statsHolder.containers, id)
+					continue
 				}
+				return nil, err
 			}
-		*/
+			statsHolder.containers[id].BlkIO.IOPS.create(string(b))
+		}
 	}
 	return statsHolder.containers, nil
 }
